@@ -3,12 +3,13 @@ import requests
 import json
 import re
 import os
+import time
 
 app = Flask(__name__)
 
 # Configuration from environment variables
 API_KEY = os.environ.get('API_KEY', 'yashikaaa')
-PORT = int(os.environ.get('PORT', 8070))
+PORT = int(os.environ.get('PORT', 8080))
 
 # Working credentials from your capture
 USERNAME = os.environ.get('USERNAME', 'jflpw@hi2.in')
@@ -210,7 +211,20 @@ def process_multiple_cards(api_key):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "running", "port": PORT})
+    return jsonify({"status": "running", "port": PORT, "service": "Stripe Payment API"})
+
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "service": "Stripe Payment API",
+        "endpoints": {
+            "single_card": "/key={API_KEY}/cc=CARD|MM|YY|CVC",
+            "bulk_cards": "/key={API_KEY}/cards (POST)",
+            "health": "/health"
+        },
+        "example": f"/key={API_KEY}/cc=4340762018243549|08|2028|335"
+    })
 
 
 if __name__ == '__main__':
