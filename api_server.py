@@ -3,7 +3,6 @@ import requests
 import json
 import re
 import os
-import time
 
 app = Flask(__name__)
 
